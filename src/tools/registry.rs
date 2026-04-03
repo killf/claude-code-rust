@@ -82,6 +82,10 @@ impl ToolRegistry {
         registry.register(super::task_tool::TaskTool::new(std::env::temp_dir()));
         registry.register(super::web_fetch::WebFetchTool::new());
         registry.register(super::web_search::WebSearchTool::new());
+        registry.register(super::send_user_message::SendUserMessageTool::new());
+        registry.register(super::send_message::SendMessageTool::new());
+        registry.register(super::ask_question::AskQuestionTool::new());
+        registry.register(super::config_tool::ConfigTool::new());
 
         registry
     }

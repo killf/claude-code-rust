@@ -25,3 +25,15 @@ pub enum CliError {
     #[error("Other error: {0}")]
     Other(String),
 }
+
+impl From<String> for CliError {
+    fn from(s: String) -> Self {
+        CliError::Other(s)
+    }
+}
+
+impl From<&str> for CliError {
+    fn from(s: &str) -> Self {
+        CliError::Other(s.to_string())
+    }
+}

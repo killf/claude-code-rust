@@ -65,6 +65,30 @@ impl Default for ThemeSetting {
     }
 }
 
+impl std::fmt::Display for ThemeVariant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Auto => write!(f, "auto"),
+            Self::Dark => write!(f, "dark"),
+            Self::Light => write!(f, "light"),
+            Self::System => write!(f, "system"),
+        }
+    }
+}
+
+impl std::str::FromStr for ThemeVariant {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "auto" => Ok(Self::Auto),
+            "dark" => Ok(Self::Dark),
+            "light" => Ok(Self::Light),
+            "system" => Ok(Self::System),
+            other => Err(format!("invalid theme variant: {other}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ThemeVariant {

@@ -25,6 +25,7 @@ pub struct AgentContext {
 }
 
 impl AgentContext {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         session: Session,
         config: SessionConfig,

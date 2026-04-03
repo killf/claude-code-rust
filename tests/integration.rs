@@ -532,7 +532,7 @@ fn test_tool_registry_has_all_nine_tools() {
             "missing tool: {tool}"
         );
     }
-    assert_eq!(names.len(), 9, "should have exactly 9 built-in tools");
+    assert_eq!(names.len(), 13, "should have exactly 13 built-in tools");
 }
 
 #[test]
@@ -548,8 +548,8 @@ fn test_tool_schema_has_required_fields() {
             tool.name()
         );
         assert!(
-            schema.get("properties").is_some(),
-            "{}: schema missing 'properties'",
+            schema.get("properties").is_some() || schema.get("oneOf").is_some(),
+            "{}: schema missing 'properties' or 'oneOf'",
             tool.name()
         );
         // Schema should be valid JSON
@@ -583,7 +583,7 @@ fn test_tool_registry_filter_allows_wildcard() {
 
     let registry = ToolRegistry::register_builtins();
     let all = registry.filter(&["*".to_string()], &[]);
-    assert_eq!(all.len(), 9, "wildcard allow should match all tools");
+    assert_eq!(all.len(), 13, "wildcard allow should match all tools");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

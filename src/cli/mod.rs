@@ -19,6 +19,7 @@ use crate::coordinator::agent::CoordinatorAgentBackend;
 use crate::coordinator::Coordinator;
 
 /// Build the full tool list: built-in tools + MCP tools, filtered by allow/deny lists
+#[allow(clippy::too_many_arguments)]
 async fn build_tools(
     global_config: &crate::config::GlobalConfig,
     project_config: &crate::config::ProjectConfig,
