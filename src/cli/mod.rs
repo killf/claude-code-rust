@@ -1,4 +1,13 @@
 //! CLI module
+//!
+//! Startup sequence (mirrors TypeScript's bootstrap-entry → main.tsx → init()):
+//!   Bootstrap::load()        → load configs only
+//!   inject_config_env()       → apply settings.json.env → std::env
+//!   setup_graceful_shutdown()
+//!   initialize_warning_handler()
+//!   init_sinks()
+//!   register_cleanup(...)
+//!   Bootstrap::resolve_auth() → ANTHROPIC_AUTH_TOKEN now visible in std::env
 
 pub mod args;
 pub mod bootstrap;
@@ -143,6 +152,27 @@ pub async fn run() -> Result<(), CliError> {
     Ok(())
 }
 
+async fn init_cli(bootstrap: &bootstrap::Bootstrap) {
+    // Apply settings.json.env → std::env BEFORE any network calls.
+    // This makes ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, etc. visible to reqwest.
+    crate::init::env_inject::inject_config_env(&bootstrap.global_config.env);
+}
+
+/// Phase A of Bootstrap — load configs only, no auth.
+/// Caller must call init_cli() then Bootstrap::resolve_auth() afterwards.
+async fn load_bootstrap(args: &CliArgs) -> Result<bootstrap::Bootstrap, CliError> {
+    bootstrap::Bootstrap::load(
+        args.model.clone(),
+        args.permission_mode.clone(),
+        args.dangerously_skip_permission.clone(),
+        args.add_env.clone(),
+        args.system_prompt.clone(),
+        args.mcp_config.clone(),
+        args.verbose,
+    )
+    .await
+}
+
 async fn run_interactive(args: &CliArgs) -> Result<(), CliError> {
     use crate::agent::context::AgentContext;
     use crate::agent::engine::{AgentEngine, AgentOutcome};
@@ -153,16 +183,31 @@ async fn run_interactive(args: &CliArgs) -> Result<(), CliError> {
     use crate::coordinator::Coordinator;
     use crate::tui::event_loop::{run_repl, ReplState};
 
-    let bootstrap = bootstrap::Bootstrap::new(
-        args.model.clone(),
-        args.permission_mode.clone(),
-        args.dangerously_skip_permission.clone(),
-        args.add_env.clone(),
-        args.system_prompt.clone(),
-        args.mcp_config.clone(),
-        args.verbose,
-    )
-    .await?;
+    // ── Bootstrap Phase A: load configs ──────────────────────────────────────
+    let mut bootstrap = load_bootstrap(args).await?;
+
+    // ── Init: config env injection ──────────────────────────────────────────
+    init_cli(&bootstrap).await;
+
+    // ── Init: graceful shutdown + warning handler ────────────────────────────
+    crate::init::graceful::setup_graceful_shutdown();
+    crate::init::warning::initialize_warning_handler();
+    crate::init::sinks::init_sinks();
+
+    // ── Init: cleanup registry ───────────────────────────────────────────────
+    // Register cleanup: flush analytics on exit.
+    // Phase 1: analytics writes synchronously so flush is a no-op.
+    // Phase 2: replace with real async flush.
+    fn noop_cleanup() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+        Box::pin(std::future::ready(()))
+    }
+    // Ignore the unregister handle — cleanup runs on exit regardless.
+    let _ = crate::init::cleanup::register_cleanup(noop_cleanup);
+
+    // ── Bootstrap Phase B: resolve auth ────────────────────────────────────
+    // After inject_config_env(), ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL
+    // from settings.json.env are now visible via std::env::var().
+    bootstrap.resolve_auth().await?;
 
     // Start LSP servers from global config
     let workspace_root = std::env::current_dir().unwrap_or_default();
@@ -305,16 +350,17 @@ async fn run_non_interactive(args: &CliArgs) -> Result<(), CliError> {
     use crate::api::client::ApiClient;
     use crate::types::{Session, SessionConfig};
 
-    let bootstrap = bootstrap::Bootstrap::new(
-        args.model.clone(),
-        args.permission_mode.clone(),
-        args.dangerously_skip_permission.clone(),
-        args.add_env.clone(),
-        args.system_prompt.clone(),
-        args.mcp_config.clone(),
-        args.verbose,
-    )
-    .await?;
+    // ── Bootstrap Phase A ────────────────────────────────────────────────────
+    let mut bootstrap = load_bootstrap(args).await?;
+
+    // ── Init ────────────────────────────────────────────────────────────────
+    init_cli(&bootstrap).await;
+    crate::init::graceful::setup_graceful_shutdown();
+    crate::init::warning::initialize_warning_handler();
+    crate::init::sinks::init_sinks();
+
+    // ── Bootstrap Phase B ────────────────────────────────────────────────────
+    bootstrap.resolve_auth().await?;
 
     let prompt = args.combined_prompt().unwrap_or_default();
 
@@ -380,16 +426,17 @@ async fn run_resume(args: &CliArgs) -> Result<(), CliError> {
 
     let session_id = args.resume.as_ref().unwrap();
 
-    let bootstrap = bootstrap::Bootstrap::new(
-        args.model.clone(),
-        args.permission_mode.clone(),
-        args.dangerously_skip_permission.clone(),
-        args.add_env.clone(),
-        args.system_prompt.clone(),
-        args.mcp_config.clone(),
-        args.verbose,
-    )
-    .await?;
+    // ── Bootstrap Phase A ────────────────────────────────────────────────────
+    let mut bootstrap = load_bootstrap(args).await?;
+
+    // ── Init ────────────────────────────────────────────────────────────────
+    init_cli(&bootstrap).await;
+    crate::init::graceful::setup_graceful_shutdown();
+    crate::init::warning::initialize_warning_handler();
+    crate::init::sinks::init_sinks();
+
+    // ── Bootstrap Phase B ────────────────────────────────────────────────────
+    bootstrap.resolve_auth().await?;
 
     let session = bootstrap.session_storage.load(session_id).await
         .map_err(|e| CliError::Session(format!("failed to load session: {e}")))?;

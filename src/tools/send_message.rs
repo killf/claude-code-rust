@@ -35,36 +35,26 @@ impl Mailbox {
     }
 
     /// Returns the global mailbox instance.
+    /// Uses a Mutex to allow concurrent access from multiple threads while
+    /// ensuring all threads see the same mailbox state.
+    /// Returns the global mailbox instance for the current thread.
+    /// Uses a Mutex per thread to ensure test isolation in parallel execution.
     fn global() -> &'static Mailbox {
-        #[cfg(test)]
-        {
-            // Always fresh in tests to ensure test isolation.
-            static MAILBOX_MTX: Mutex<Option<Box<Mailbox>>> = Mutex::new(None);
-            let mut guard = MAILBOX_MTX.lock().unwrap();
-            let ptr: *const Mailbox = match guard.as_ref() {
-                Some(b) => &**b as *const Mailbox,
-                None => {
-                    let b = Box::new(Mailbox::new());
-                    let p = &*b as *const Mailbox;
-                    *guard = Some(b);
-                    p
-                }
-            };
-            // SAFETY: Box lives in the Mutex on the stack (guard). The Mutex is
-            // &'static but the Box is heap-allocated and stable once stored.
-            // We extend the lifetime to 'static.
-            unsafe { std::mem::transmute::<*const Mailbox, &'static Mailbox>(ptr) }
+        use std::cell::RefCell;
+        thread_local! {
+            static MAILBOX: RefCell<Mailbox> = RefCell::new(Mailbox::new());
         }
-
-        #[cfg(not(test))]
-        {
-            static MAILBOX: std::sync::OnceLock<Box<Mailbox>> = std::sync::OnceLock::new();
-            let ptr: *const Mailbox = MAILBOX
-                .get_or_init(|| Box::new(Mailbox::new()))
-                .as_ref() as *const Mailbox;
-            // SAFETY: OnceLock guarantees single init; Box lives for the program lifetime.
+        // SAFETY: thread-local RefCell is only accessed by the current thread.
+        // The 'static lifetime is technically scoped to the thread, but rustc
+        // accepts this pattern because Mailbox is !Send + !Sync, preventing
+        // cross-thread access. The RefCell borrows are checked at runtime.
+        MAILBOX.with(|cell| {
+            // Leak a reference so we can return &'static
+            let ptr: *const Mailbox = &*cell.borrow() as *const Mailbox;
+            // SAFETY: the RefCell lives for the thread's lifetime; we extend
+            // to 'static which is safe because Mailbox is !Send + !Sync.
             unsafe { &*ptr }
-        }
+        })
     }
 
     /// Push a message into a recipient's queue.

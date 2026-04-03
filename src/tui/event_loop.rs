@@ -4,13 +4,11 @@ use crate::commands::SessionState;
 use crate::coordinator::Coordinator;
 use crate::api::client::ApiClient;
 use crate::types::{Session, Tool};
-use crossterm::event::{EventStream, KeyCode, KeyModifiers};
-use futures::{future::BoxFuture, StreamExt};
+use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex;
 
 /// Shared state for REPL commands
@@ -116,17 +114,21 @@ impl ReplHistory {
     }
 }
 
-async fn read_line(reader: &mut EventStream) -> Result<String, io::Error> {
+/// Read a line from stdin, supporting basic editing (backspace) and Ctrl+C.
+/// Uses crossterm terminal mode to intercept individual keypresses.
+fn read_line_sync() -> Result<String, io::Error> {
+    use crossterm::event::{read, Event, KeyCode, KeyModifiers};
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
+    enable_raw_mode()?;
+
     let mut input = String::new();
+
     loop {
-        let timeout = tokio::time::timeout(Duration::from_millis(100), reader.next()).await;
-        match timeout {
-            Ok(Some(Ok(crossterm::event::Event::Key(key)))) => {
-                if key
-                    .modifiers
-                    .contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char('c')
-                {
+        match read() {
+            Ok(Event::Key(key)) => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+                    disable_raw_mode().ok();
                     return Ok(String::new());
                 }
                 match key.code {
@@ -146,26 +148,32 @@ async fn read_line(reader: &mut EventStream) -> Result<String, io::Error> {
                         }
                     }
                     KeyCode::Esc => {
+                        disable_raw_mode().ok();
                         return Ok(String::new());
                     }
                     _ => {}
                 }
             }
-            Ok(None) | Err(_) => {
-                return Ok(input);
-            }
-            _ => {}
+            Ok(_) => {}
+            Err(_) => break,
         }
     }
+
+    disable_raw_mode().ok();
     Ok(input)
+}
+
+/// Async wrapper: run the sync reader in a blocking task.
+async fn read_line() -> Result<String, io::Error> {
+    tokio::task::spawn_blocking(read_line_sync)
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "read_line task cancelled"))?
 }
 
 pub async fn run_repl(
     mut on_message: impl FnMut(String) -> BoxFuture<'static, bool>,
     state: ReplState,
 ) -> Result<(), io::Error> {
-    let mut reader = EventStream::new();
-
     println!("Claude Code Interactive Mode");
     println!(
         "Type your message and press Enter. Ctrl+C or Esc to exit.\nType /help for commands.\n---\n"
@@ -175,7 +183,7 @@ pub async fn run_repl(
         print!("\n> ");
         io::stdout().flush()?;
 
-        let input = read_line(&mut reader).await?;
+        let input = read_line().await?;
         let text = input.trim().to_string();
         if text.is_empty() {
             continue;

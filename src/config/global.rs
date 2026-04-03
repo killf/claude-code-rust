@@ -5,9 +5,15 @@ use std::collections::HashMap;
 
 use crate::types::PermissionMode;
 
+fn default_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 /// Global configuration (stored in ~/.claude/settings.json)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GlobalConfig {
+    #[serde(default = "default_version")]
     pub version: String,
     pub theme: ThemeSetting,
     pub verbose: bool,

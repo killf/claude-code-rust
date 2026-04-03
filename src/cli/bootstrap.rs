@@ -1,4 +1,11 @@
 //! Bootstrap and initialization logic
+//!
+//! Mirrors TypeScript's layered startup:
+//!   bootstrap-entry.ts  → main.tsx  →  init()  →  REPL
+//!
+//! The Rust equivalent:
+//!   main.rs            →  Bootstrap::load()  →  inject_config_env()
+//!   → setup_graceful_shutdown()  →  Bootstrap::resolve_auth()  →  REPL
 
 use std::collections::HashMap;
 use crate::config::{ConfigLoader, McpServerConfig};
@@ -21,8 +28,16 @@ pub struct Bootstrap {
 }
 
 impl Bootstrap {
-    /// Initialize the application bootstrap
-    pub async fn new(
+    /// Phase A: Load configs only. No network requests (no auth).
+    ///
+    /// After this returns, the caller should:
+    ///   1. inject_config_env(&bootstrap.global_config.env)
+    ///   2. setup_graceful_shutdown()
+    ///   3. initialize_warning_handler()
+    ///   4. init_sinks()
+    ///   5. register_cleanup(...)
+    ///   6. bootstrap.resolve_auth().await
+    pub async fn load(
         _model: Option<String>,
         permission_mode_arg: Option<String>,
         dangerously_skip_permission: Option<String>,
@@ -31,11 +46,13 @@ impl Bootstrap {
         mcp_config_arg: Option<String>,
         verbose: bool,
     ) -> Result<Self, CliError> {
-        // Load configuration
         let config_loader = ConfigLoader::new();
+
+        // Load global config (~/.claude/settings.json)
         let global_config = config_loader.load_global_config().await
             .map_err(|e| CliError::Config(format!("failed to load global config: {e}")))?;
 
+        // Load project config (.claude.json / .clauderc)
         let project_config = config_loader.load_project_config(None).await
             .map_err(|e| CliError::Config(format!("failed to load project config: {e}")))?;
 
@@ -69,19 +86,7 @@ impl Bootstrap {
             None
         };
 
-        // Resolve provider and API key
         let provider = global_config.model_preferences.provider;
-        let api_key = crate::api::auth::resolve_api_key(
-            provider,
-            global_config.model_preferences.api_key.as_deref(),
-        )
-        .await?;
-
-        // Determine base URL
-        let base_url = crate::api::auth::get_base_url(
-            provider,
-            global_config.model_preferences.base_url.as_deref(),
-        );
 
         // Resolve permission mode
         let permission_mode = resolve_permission_mode(
@@ -90,20 +95,20 @@ impl Bootstrap {
             &global_config,
         );
 
-        // Initialize session storage
         let session_storage = SessionStorage::new();
 
         if verbose {
-            eprintln!("Bootstrap complete:");
+            eprintln!("Bootstrap load complete:");
             eprintln!("  provider: {:?}", provider);
-            eprintln!("  base_url: {}", base_url);
             eprintln!("  permission_mode: {:?}", permission_mode);
+            eprintln!("  config env vars: {} keys", global_config.env.len());
         }
 
+        // api_key and base_url are left empty — resolve_auth() fills them.
         Ok(Self {
-            api_key,
+            api_key: String::new(),
             provider,
-            base_url,
+            base_url: String::new(),
             permission_mode,
             session_storage,
             global_config,
@@ -112,6 +117,28 @@ impl Bootstrap {
             system_prompt,
             extra_mcp_servers,
         })
+    }
+
+    /// Phase B: Resolve auth (API key + base URL).
+    ///
+    /// MUST be called AFTER inject_config_env() so that:
+    ///   - ANTHROPIC_AUTH_TOKEN from global_config.env is visible via std::env::var()
+    ///   - ANTHROPIC_BASE_URL from global_config.env is visible to get_base_url()
+    pub async fn resolve_auth(&mut self) -> Result<(), CliError> {
+        // resolve_api_key checks ANTHROPIC_AUTH_TOKEN first (Bearer token priority).
+        self.api_key = crate::api::auth::resolve_api_key(
+            self.provider,
+            self.global_config.model_preferences.api_key.as_deref(),
+        )
+        .await?;
+
+        // get_base_url checks ANTHROPIC_BASE_URL env var (injected from settings.json.env).
+        self.base_url = crate::api::auth::get_base_url(
+            self.provider,
+            self.global_config.model_preferences.base_url.as_deref(),
+        );
+
+        Ok(())
     }
 }
 

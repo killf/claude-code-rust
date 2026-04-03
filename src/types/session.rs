@@ -114,6 +114,18 @@ pub struct SessionConfig {
     pub permission_mode: PermissionMode,
     pub tools: Vec<serde_json::Value>,
     pub metadata: HashMap<String, serde_json::Value>,
+    /// Highest-priority override prompt (e.g., loop mode)
+    pub override_prompt: Option<String>,
+    /// Coordinator (multi-agent) mode
+    pub coordinator_mode: bool,
+    /// Agent definition system prompt
+    pub agent_definition: Option<String>,
+    /// Proactive (KAIROS) mode
+    pub proactive_mode: bool,
+    /// Custom system prompt (--system-prompt flag)
+    pub custom_prompt: Option<String>,
+    /// Prompt appended to end of system prompt
+    pub append_prompt: Option<String>,
 }
 
 impl Default for SessionConfig {
@@ -126,6 +138,12 @@ impl Default for SessionConfig {
             permission_mode: PermissionMode::Default,
             tools: Vec::new(),
             metadata: HashMap::new(),
+            override_prompt: None,
+            coordinator_mode: false,
+            agent_definition: None,
+            proactive_mode: false,
+            custom_prompt: None,
+            append_prompt: None,
         }
     }
 }

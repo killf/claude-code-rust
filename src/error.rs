@@ -22,6 +22,8 @@ pub enum CliError {
     Json(#[from] serde_json::Error),
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
+    #[error("Parse error: {0}")]
+    Parse(String),
     #[error("Other error: {0}")]
     Other(String),
 }

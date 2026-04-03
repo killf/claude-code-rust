@@ -19,6 +19,10 @@ pub struct Hook {
 pub enum HookType {
     PreToolUse,
     PostToolUse,
+    SessionStart,
+    UserPromptSubmit,
+    SessionEnd,
+    Stop,
 }
 
 impl Hook {
@@ -99,6 +103,10 @@ pub fn load_hooks_from_config(hooks_config: &[HookConfig]) -> Vec<Hook> {
             let hook_type = match event.as_str() {
                 "pre_tool_use" => HookType::PreToolUse,
                 "post_tool_use" => HookType::PostToolUse,
+                "session_start" => HookType::SessionStart,
+                "user_prompt_submit" => HookType::UserPromptSubmit,
+                "session_end" => HookType::SessionEnd,
+                "stop" => HookType::Stop,
                 _ => continue,
             };
 

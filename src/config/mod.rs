@@ -2,9 +2,15 @@
 
 pub mod global;
 pub mod project;
+pub mod file_lock;
+pub mod backup;
+pub mod recovery;
 
+pub use backup::{create_backup, find_most_recent_backup};
+pub use file_lock::ConfigLock;
 pub use global::*;
 pub use project::*;
+pub use recovery::load_config_with_recovery;
 
 use std::path::PathBuf;
 use anyhow::Result;
@@ -19,9 +25,11 @@ pub struct ConfigLoader {
 
 impl ConfigLoader {
     pub fn new() -> Self {
-        let global_path = dirs::config_dir()
+        // Use ~/.claude/settings.json (not XDG ~/.config/claude/).
+        // TypeScript uses os.homedir() + '/.claude/settings.json'.
+        let global_path = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("claude");
+            .join(".claude");
         Self {
             global_path,
             project_path: PathBuf::from(".claude"),
